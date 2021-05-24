@@ -48,35 +48,41 @@ def main():
     # Remove saturated data
     beads[beads == type_max] = type_min
     
+    # Mean in stack
+    data_mean = np.mean(beads)
+
     # Bounding box
-    x_pos = 4
-    x_neg = 4
-    y_pos = 4
-    y_neg = 4
-    z_pos = 14
-    z_neg = 14
+    x_box = 4
+    y_box = 4
+    z_box = 14
     
     # Grids
-    x_val = np.array(range(0, x_pos+x_neg+1))
-    y_val = np.array(range(0, y_pos+y_neg+1))
-    z_val = np.array(range(0, z_pos+z_neg+1))
+    x_val = np.array(range(0, x_box+x_box+1))
+    y_val = np.array(range(0, y_box+y_box+1))
+    z_val = np.array(range(0, z_box+z_box+1))
     z_grid, x_grid, y_grid = np.meshgrid(z_val, x_val, y_val, indexing='ij')
     xdata = np.vstack((z_grid.ravel(), x_grid.ravel(), y_grid.ravel()))
     
     # Initial guess
     bg = 1e3
     A_coeff = 1e4
-    x_0 = x_neg
-    y_0 = y_neg
-    z_0 = z_neg
+    x_0 = x_box
+    y_0 = y_box
+    z_0 = z_box
     x_sig = 2
     y_sig = x_sig
     z_sig = 4
     p0 = bg, A_coeff, x_0, y_0, z_0, x_sig, y_sig, z_sig
     
+    # Loop parameters
     loop = True
     count = 0
-    threshold = 100
+    threshold = 500
+    
+    # Initializations
+    x_coord_abs = np.zeros(threshold,)
+    y_coord_abs = np.zeros(threshold,)
+    z_coord_abs = np.zeros(threshold,)
     
     x_sigma = np.zeros(threshold,)
     y_sigma = np.zeros(threshold,)
@@ -84,26 +90,30 @@ def main():
     
     while loop:
         # Find first maximum in stack
-        indices = np.where(beads == np.amax(beads))
-        x_coord = indices[1][0]
-        y_coord = indices[2][0]
-        z_coord = indices[0][0]
+        z_coord, x_coord, y_coord = np.unravel_index(np.argmax(beads,
+                                                               axis=None),
+                                                     beads.shape)
 
         # Index in range? Otherwise put to type_min (edge cases)
-        x_limits = x_coord > x_neg and x_coord < size_x-1-x_pos
-        y_limits = y_coord > y_neg and y_coord < size_y-1-y_pos 
-        z_limits = z_coord > z_neg and z_coord < size_z-1-z_pos 
+        x_limits = x_coord > x_box and x_coord < size_x-1-x_box
+        y_limits = y_coord > y_box and y_coord < size_y-1-y_box 
+        z_limits = z_coord > z_box and z_coord < size_z-1-z_box 
             
         if x_limits and y_limits and z_limits:
             # Retrieve bead bounding box (the box doesn't have ownership in
             # Python, if beads is modified, box will be modified as well)
-            box = beads[z_coord-z_neg:z_coord+z_neg+1,
-                        x_coord-x_neg:x_coord+x_pos+1,
-                        y_coord-y_neg:y_coord+y_neg+1]
+            box = beads[z_coord-z_box:z_coord+z_box+1,
+                        x_coord-x_box:x_coord+x_box+1,
+                        y_coord-y_box:y_coord+y_box+1]
             
             # Check all voxels of the box > type_min (valid bead data)
             if np.amin(box) > type_min:
+                # 3D Gaussian fit
                 popt, pcov = curve_fit(gauss_3d, xdata, box.ravel(), p0)
+                
+                x_coord_abs[count] = popt[2] + x_coord - x_box
+                y_coord_abs[count] = popt[3] + y_coord - y_box
+                z_coord_abs[count] = popt[4] + z_coord - z_box
                 x_sigma[count] = popt[5]
                 y_sigma[count] = popt[6]
                 z_sigma[count] = popt[7]
@@ -113,16 +123,30 @@ def main():
                     loop = False   
                     
             # Clear box
-            beads[z_coord-z_neg:z_coord+z_neg,
-                  x_coord-x_neg:x_coord+x_pos,
-                  y_coord-y_neg:y_coord+y_neg] = type_min
+            beads[z_coord-z_box:z_coord+z_box,
+                  x_coord-x_box:x_coord+x_box,
+                  y_coord-y_box:y_coord+y_box] = type_min
         else:
             beads[z_coord, x_coord, y_coord] = type_min
-
-    plt.hist(x_sigma)
-    plt.hist(y_sigma)
-    plt.hist(z_sigma)
+    
+    return x_coord_abs, y_coord_abs, z_coord_abs, x_sigma, y_sigma, z_sigma
 
 
 if __name__ == "__main__":
-     main()
+    x_coord_abs, y_coord_abs, z_coord_abs, x_sigma, y_sigma, z_sigma = main()
+     
+    plt.figure()
+    plt.scatter(y_coord_abs, z_sigma, s=3)
+    plt.show()
+    
+    plt.figure()
+    plt.hist(x_sigma)
+    plt.show()
+    
+    plt.figure()
+    plt.hist(y_sigma)
+    plt.show()
+    
+    plt.figure()
+    plt.hist(z_sigma)
+    plt.show()
