@@ -6,12 +6,14 @@ Created on Tue May 11 16:30:56 2021
 """
 
 
+import math
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.optimize import curve_fit
+from sklearn.metrics import mean_squared_error
 
 
-# Read binary files from SiMView
+# Read binary files from SIMVIEW
 def read_binary(file_path, size_x=2304, size_y=2304,
                         file_type=np.uint16):
     # Read binary stack as a single vector of 16-bits unsigned integers
@@ -28,9 +30,11 @@ def read_binary(file_path, size_x=2304, size_y=2304,
 
 
 # Gaussian function to fit on 3D bead data
-def gauss_3d(coords, bg, A_coeff, x_0, y_0, z_0,
-             x_sig, y_sig, z_sig):
+def gauss_3d(coords, bg, A_coeff, x_0, y_0, z_0, x_sig, y_sig, z_sig):
+    # Expose X, Y, and Z coordinates
     z_val, x_val, y_val = coords
+    
+    # General Gaussian function 3D
     return bg + A_coeff * np.exp(-((x_val-x_0) ** 2 / (2 * x_sig ** 2) +
                                    (y_val-y_0) ** 2 / (2 * y_sig ** 2) +
                                    (z_val-z_0) ** 2 / (2 * z_sig ** 2)))
@@ -38,7 +42,7 @@ def gauss_3d(coords, bg, A_coeff, x_0, y_0, z_0,
 
 def main():
     # Read beads data
-    img_path = r'E:\Data\20210316_0.1um-beads\_20210316_131127\SPC00_TM00000_ANG000_CM0_CHN00_PH0.stack'
+    img_path = r'E:\SIMVIEW 5 Data\0.1um-beads_CloseToDet2_20210603_151041\SPC00_TM00000_ANG000_CM0_CHN00_PH0.stack'
     (beads, (size_x, size_y, size_z)) = read_binary(img_path)
 
     # Data type boundaries
@@ -47,9 +51,6 @@ def main():
        
     # Remove saturated data
     beads[beads == type_max] = type_min
-    
-    # Mean in stack
-    data_mean = np.mean(beads)
 
     # Bounding box
     x_box = 4
@@ -69,9 +70,9 @@ def main():
     x_0 = x_box
     y_0 = y_box
     z_0 = z_box
-    x_sig = 2
+    x_sig = 1
     y_sig = x_sig
-    z_sig = 4
+    z_sig = 2
     p0 = bg, A_coeff, x_0, y_0, z_0, x_sig, y_sig, z_sig
     
     # Loop parameters
@@ -87,6 +88,8 @@ def main():
     x_sigma = np.zeros(threshold,)
     y_sigma = np.zeros(threshold,)
     z_sigma = np.zeros(threshold,)
+    
+    RMSE = np.zeros(threshold,)
     
     while loop:
         # Find first maximum in stack
@@ -118,6 +121,10 @@ def main():
                 y_sigma[count] = popt[6]
                 z_sigma[count] = popt[7]
                 
+                RMSE[count] = mean_squared_error(gauss_3d(xdata, *popt),
+                                                 box.ravel())
+                RMSE[count] = math.sqrt(RMSE[count])
+                
                 count += 1 
                 if count >= threshold:
                     loop = False   
@@ -129,24 +136,45 @@ def main():
         else:
             beads[z_coord, x_coord, y_coord] = type_min
     
-    return x_coord_abs, y_coord_abs, z_coord_abs, x_sigma, y_sigma, z_sigma
+    return x_coord_abs, y_coord_abs, z_coord_abs, x_sigma, y_sigma, z_sigma, RMSE
 
 
 if __name__ == "__main__":
-    x_coord_abs, y_coord_abs, z_coord_abs, x_sigma, y_sigma, z_sigma = main()
+    x_coord_abs, y_coord_abs, z_coord_abs, x_sigma, y_sigma, z_sigma, RMSE = main()
      
-    plt.figure()
-    plt.scatter(y_coord_abs, z_sigma, s=3)
-    plt.show()
+    det = 2304
+    pix = 6.5
+    mag = 20
+    
+    z_step = 1
+    
+    Y_axis = ( y_coord_abs - det / 2 ) * pix / mag
     
     plt.figure()
-    plt.hist(x_sigma)
+    plt.scatter(Y_axis, np.abs( 2.355 * z_sigma * z_step ), s=10,
+                c=np.log(RMSE/np.amax(RMSE)*100), cmap='cividis', alpha=0.5)
+    ax = plt.axes()
+    ax.set_facecolor("darkgray")
+    plt.grid(color='gray')
+    plt.xlabel('Y position [um] (direction of light-sheet propagation)')
+    plt.ylabel('Axial FWHM [um]')
+    plt.ylim(0, 10)
+    cbar = plt.colorbar()
+    cbar.set_label('Normalized RMSE in log-scale')
     plt.show()
     
-    plt.figure()
-    plt.hist(y_sigma)
-    plt.show()
+    # plt.figure()
+    # plt.hist(x_sigma)
+    # plt.show()
     
-    plt.figure()
-    plt.hist(z_sigma)
-    plt.show()
+    # plt.figure()
+    # plt.hist(y_sigma)
+    # plt.show()
+    
+    # plt.figure()
+    # plt.hist(z_sigma)
+    # plt.show()
+    
+    # plt.figure()
+    # plt.hist(RMSE)
+    # plt.show()
